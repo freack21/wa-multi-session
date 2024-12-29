@@ -26,6 +26,14 @@ export interface MessageReceived extends proto.IWebMessageInfo {
   sessionId: string;
 
   /**
+   * Message media
+   */
+  media?: {
+    mimeType: string;
+    data: string;
+  };
+
+  /**
    * @param path save image location path with extension
    * @example "./myimage.jpg"
    */
@@ -47,9 +55,18 @@ export interface StartSessionParams {
    * Print QR Code into Terminal
    */
   printQR?: boolean;
+  /**
+   * Use pairing code method
+   */
+  pairCode?: boolean;
+  /**
+   * Phone number for session with pairing code
+   */
+  phoneNumber?: string;
 
   // session events
   onQRUpdated?: (qr: string) => void;
+  onPairingCode?: (code: string) => void;
   onConnected?: () => void;
   onConnecting?: () => void;
   onDisconnected?: () => void;
@@ -57,13 +74,6 @@ export interface StartSessionParams {
   // message events
   onMessageReceived?: (message: MessageReceived) => void;
   onMessageUpdated?: (message: MessageUpdated) => void;
-}
-
-export interface StartSessionWithPairingCodeParams {
-  /**
-   * Phone Number with Country Code
-   */
-  phoneNumber: string;
 }
 
 export type MessageUpdated = WAMessageUpdate & {

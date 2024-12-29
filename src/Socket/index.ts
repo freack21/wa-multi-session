@@ -13,7 +13,6 @@ import type {
   MessageReceived,
   MessageUpdated,
   StartSessionParams,
-  StartSessionWithPairingCodeParams,
 } from "../Types";
 import { CALLBACK_KEY, CREDENTIALS, Messages } from "../Defaults";
 import {
@@ -55,7 +54,10 @@ function getMediaMimeType(conversation: any): string {
   );
 }
 
-export const startSession = async (
+/**
+ * Start WhatsApp session with QR method
+ */
+export const startSessionWithQR = async (
   sessionId = "mysession",
   options: StartSessionParams = { printQR: true }
 ): Promise<WASocket> => {
@@ -138,8 +140,15 @@ export const startSession = async (
           options.onMessageUpdated?.(data);
         }
         if (events["messages.upsert"]) {
-          const msg = events["messages.upsert"]
+          let msg = events["messages.upsert"]
             .messages?.[0] as unknown as MessageReceived;
+          const mimeType = getMediaMimeType(msg);
+          const media = { mimeType, data: "" };
+          if (mimeType !== "") {
+            const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
+            media.data = mediaBuffer.toString("base64");
+          }
+          msg.media = media;
           msg.sessionId = sessionId;
           msg.saveImage = (path) => saveImageHandler(msg, path);
           msg.saveVideo = (path) => saveVideoHandler(msg, path);
@@ -160,12 +169,11 @@ export const startSession = async (
 };
 
 /**
- *
- * @deprecated Use startSession method instead
+ * Start WhatsApp session with pairing code method
  */
 export const startSessionWithPairingCode = async (
   sessionId: string,
-  options: StartSessionWithPairingCodeParams
+  options: StartSessionParams
 ): Promise<WASocket> => {
   if (isSessionExistAndRunning(sessionId))
     throw new WhatsappError(Messages.sessionAlreadyExist(sessionId));
@@ -190,6 +198,7 @@ export const startSessionWithPairingCode = async (
         const code = await sock.requestPairingCode(options.phoneNumber);
         console.log(code);
         callback.get(CALLBACK_KEY.ON_PAIRING_CODE)?.(sessionId, code);
+        options.onPairingCode?.(code);
       }
 
       sock.ev.process(async (events) => {
@@ -201,9 +210,11 @@ export const startSessionWithPairingCode = async (
               sessionId,
               qr: update.qr,
             });
+            options.onQRUpdated?.(update.qr);
           }
           if (connection == "connecting") {
             callback.get(CALLBACK_KEY.ON_CONNECTING)?.(sessionId);
+            options.onConnecting?.();
           }
           if (connection === "close") {
             const code = (lastDisconnect?.error as Boom)?.output?.statusCode;
@@ -214,19 +225,19 @@ export const startSessionWithPairingCode = async (
             }
             if (shouldRetry) {
               retryAttempt++;
-            }
-            if (shouldRetry) {
               retryCount.set(sessionId, retryAttempt);
               startSocket();
             } else {
               retryCount.delete(sessionId);
               deleteSession(sessionId);
               callback.get(CALLBACK_KEY.ON_DISCONNECTED)?.(sessionId);
+              options.onDisconnected?.();
             }
           }
           if (connection == "open") {
             retryCount.delete(sessionId);
             callback.get(CALLBACK_KEY.ON_CONNECTED)?.(sessionId);
+            options.onConnected?.();
           }
         }
         if (events["creds.update"]) {
@@ -234,16 +245,32 @@ export const startSessionWithPairingCode = async (
         }
         if (events["messages.update"]) {
           const msg = events["messages.update"][0];
+          const mimeType = getMediaMimeType(msg);
+          const media = { mimeType, data: "" };
+          if (mimeType !== "") {
+            const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
+            media.data = mediaBuffer.toString("base64");
+          }
+
           const data: MessageUpdated = {
             sessionId: sessionId,
             messageStatus: parseMessageStatusCodeToReadable(msg.update.status!),
             ...msg,
+            ...media,
           };
           callback.get(CALLBACK_KEY.ON_MESSAGE_UPDATED)?.(sessionId, data);
+          options.onMessageUpdated?.(data);
         }
         if (events["messages.upsert"]) {
-          const msg = events["messages.upsert"]
+          let msg = events["messages.upsert"]
             .messages?.[0] as unknown as MessageReceived;
+          const mimeType = getMediaMimeType(msg);
+          const media = { mimeType, data: "" };
+          if (mimeType !== "") {
+            const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
+            media.data = mediaBuffer.toString("base64");
+          }
+          msg.media = media;
           msg.sessionId = sessionId;
           msg.saveImage = (path) => saveImageHandler(msg, path);
           msg.saveVideo = (path) => saveVideoHandler(msg, path);
@@ -251,6 +278,7 @@ export const startSessionWithPairingCode = async (
           callback.get(CALLBACK_KEY.ON_MESSAGE_RECEIVED)?.({
             ...msg,
           });
+          options.onMessageReceived?.(msg);
         }
       });
       return sock;
@@ -263,9 +291,17 @@ export const startSessionWithPairingCode = async (
 };
 
 /**
- * @deprecated Use startSession method instead
+ * start WhatsApp session
  */
-export const startWhatsapp = startSession;
+export const startWhatsapp = (
+  sessionId: string,
+  options: StartSessionParams = { printQR: true, pairCode: false }
+): Promise<WASocket> => {
+  if (options.pairCode) {
+    return startSessionWithPairingCode(sessionId, options);
+  }
+  return startSessionWithQR(sessionId, options);
+};
 
 export const deleteSession = async (sessionId: string) => {
   const session = getSession(sessionId);
@@ -329,7 +365,7 @@ export const loadSessionsFromStorage = () => {
     for (const dir of dirs) {
       const sessionId = dir.split("_")[0];
       if (!shouldLoadSession(sessionId)) continue;
-      startSession(sessionId);
+      startSessionWithQR(sessionId);
     }
   });
 };
@@ -359,5 +395,5 @@ export const onMessageUpdate = (listener: (data: MessageUpdated) => any) => {
 export const onPairingCode = (
   listener: (sessionId: string, code: string) => any
 ) => {
-  callback.set(CALLBACK_KEY.ON_MESSAGE_UPDATED, listener);
+  callback.set(CALLBACK_KEY.ON_PAIRING_CODE, listener);
 };
