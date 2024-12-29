@@ -2,7 +2,7 @@
 
 Connecting Your app with Whatsapp Messaging
 
-Lightweight library for whatsapp. Not require Selenium or any other browser.
+Lightweight library for WhatsApp. Not require Selenium or any other browser.
 
 Stand above [Baileys](https://github.com/WhiskeySockets/Baileys) Library.
 
@@ -37,8 +37,22 @@ Start New Session
 ```ts
 // create session with ID : mysessionid
 
-const session = await whatsapp.startSession("mysessionid");
+// with QR
+const session = await whatsapp.startWhatsapp("mysessionid");
+// or
+const session = await whatsapp.startSessionWithQR("mysessionid");
 // Then, scan QR on terminal
+
+// with pair code (experimental)
+const session = await whatsapp.startWhatsapp("mysessionid", {
+  pairCode: true,
+  phoneNumber: "628xxxxxxx",
+});
+//or
+const session = await whatsapp.startSessionWithPairingCode("mysessionid", {
+  phoneNumber: "628xxxxxxx",
+});
+// Then, pair your code
 ```
 
 Get All Session ID
@@ -195,7 +209,7 @@ whatsapp.onMessageReceived(async (msg) => {
 ## Save Media Message (Image, Video, Document)
 
 ```ts
-wa.onMessageReceived(async (msg) => {
+whatsapp.onMessageReceived(async (msg) => {
   if (msg.message?.imageMessage) {
     // save image
     msg.saveImage("./myimage.jpg");
@@ -223,22 +237,6 @@ whatsapp.setCredentialsDir("my_custom_dir");
 // or : credentials/mycreds
 ```
 
-## Changelog
-
-### v3.7.0 December 2024 (LATEST)
-
-- Upgrading @whiskeysockets/baileys to ^6.7.9
-- Fix invalid phone number
-- Remove validation is registered phone number
-
-## Also Visit Headless Whatsapp Gateway API
-
-- [wa-gateway](https://www.github.com/mimamch/wa-gateway)
-
-## Authors
+## Author
 
 - [@mimamch](https://www.github.com/mimamch)
-
-## Feedback or Support
-
-If you have any feedback or support, please reach out to me at mimamch28@gmail.com

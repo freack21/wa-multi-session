@@ -194,9 +194,7 @@ export const startSessionWithPairingCode = async (
     sessions.set(sessionId, { ...sock });
     try {
       if (!sock.authState.creds.registered) {
-        console.log("first time pairing");
         const code = await sock.requestPairingCode(options.phoneNumber);
-        console.log(code);
         callback.get(CALLBACK_KEY.ON_PAIRING_CODE)?.(sessionId, code);
         options.onPairingCode?.(code);
       }
