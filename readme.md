@@ -1,4 +1,4 @@
-# Whatsapp Multi Session - Connecting More Whatsapp Session in 1 App
+# Whatsapp Socket Multi Session - Connecting More Whatsapp Session in 1 App
 
 Connecting Your app with Whatsapp Messaging
 
@@ -6,12 +6,14 @@ Lightweight library for whatsapp. Not require Selenium or any other browser.
 
 Stand above [Baileys](https://github.com/WhiskeySockets/Baileys) Library.
 
+Cloned from [wa-multi-session@mimamch](https://www.npmjs.com/package/wa-multi-session).
+
 ## Installation
 
 Install package using npm
 
 ```
-npm install wa-multi-session@latest
+npm install wa-socket-multi-session@latest
 ```
 
 Then import your code
@@ -19,13 +21,13 @@ Then import your code
 Using JS Module
 
 ```ts
-import * as whatsapp from "wa-multi-session";
+import * as whatsapp from "wa-socket-multi-session";
 ```
 
 or using CommonJS
 
 ```ts
-const whatsapp = require("wa-multi-session");
+const whatsapp = require("wa-socket-multi-session");
 ```
 
 ## Session Usage/Examples
