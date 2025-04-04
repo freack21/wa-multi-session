@@ -33,6 +33,8 @@ export interface MessageReceived extends proto.IWebMessageInfo {
     data: string;
   };
 
+  author: string;
+
   /**
    * @param path save image location path with extension
    * @example "./myimage.jpg"

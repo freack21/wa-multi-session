@@ -22,7 +22,7 @@ import {
 } from "../Utils/save-media";
 import { WhatsappError } from "../Error";
 import { parseMessageStatusCodeToReadable } from "../Utils/message-status";
-import { to } from "../Utils";
+import { phoneToJid, to } from "../Utils";
 
 const sessions: Map<string, WASocket> = new Map();
 
@@ -148,6 +148,15 @@ export const startSessionWithQR = async (
             const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
             media.data = mediaBuffer.toString("base64");
           }
+
+          const from = msg.key.remoteJid || "";
+          const participant = msg.key.participant || "";
+          const isGroup = from.includes("@g.us");
+          const isStory = from.includes("status@broadcast");
+
+          msg.author = from;
+          if (isStory || isGroup) msg.author = participant;
+
           msg.media = media;
           msg.sessionId = sessionId;
           msg.saveImage = (path) => saveImageHandler(msg, path);
