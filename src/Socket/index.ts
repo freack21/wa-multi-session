@@ -153,9 +153,12 @@ export const startSessionWithQR = async (
           const participant = msg.key.participant || "";
           const isGroup = from.includes("@g.us");
           const isStory = from.includes("status@broadcast");
+          const myJid = phoneToJid({ to: sock.user.id.split(":")[0] });
 
           msg.author = from;
           if (isStory || isGroup) msg.author = participant;
+
+          if (msg.key.fromMe) msg.author = myJid;
 
           msg.media = media;
           msg.sessionId = sessionId;
