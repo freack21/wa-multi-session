@@ -1,4 +1,8 @@
-import { WAMessageUpdate, proto } from "@whiskeysockets/baileys";
+import {
+  ParticipantAction,
+  WAMessageUpdate,
+  proto,
+} from "@whiskeysockets/baileys";
 
 export interface SendMessageTypes {
   to: string | number;
@@ -17,6 +21,14 @@ export interface SendTypingTypes extends SendMessageTypes {
 export interface SendReadTypes {
   sessionId: string;
   key: proto.IMessageKey;
+}
+
+export interface GroupMemberUpdated {
+  sessionId: string;
+  id: string;
+  author: string;
+  participants: string[];
+  action: ParticipantAction;
 }
 
 export interface MessageReceived extends proto.IWebMessageInfo {
@@ -76,6 +88,9 @@ export interface StartSessionParams {
   // message events
   onMessageReceived?: (message: MessageReceived) => void;
   onMessageUpdated?: (message: MessageUpdated) => void;
+
+  // groups events
+  onGroupMemberUpdate?: (message: GroupMemberUpdated) => void;
 }
 
 export type MessageUpdated = WAMessageUpdate & {

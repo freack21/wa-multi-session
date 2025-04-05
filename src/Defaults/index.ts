@@ -11,6 +11,8 @@ export enum CALLBACK_KEY {
   ON_CONNECTING = "on-connecting",
   ON_MESSAGE_UPDATED = "on-message-updated",
   ON_PAIRING_CODE = "on-pairing-code",
+
+  ON_GROUP_MEMBER_UPDATE = "on-group-member-update",
 }
 
 export abstract class Messages {

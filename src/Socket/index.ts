@@ -10,6 +10,7 @@ import path from "path";
 import { Boom } from "@hapi/boom";
 import fs from "fs";
 import type {
+  GroupMemberUpdated,
   MessageReceived,
   MessageUpdated,
   StartSessionParams,
@@ -54,6 +55,116 @@ function getMediaMimeType(conversation: any): string {
   );
 }
 
+const initializeSocket = async (
+  sock: WASocket,
+  sessionId: string,
+  options: StartSessionParams,
+  startSocket: Function,
+  saveCreds: Function
+): Promise<void> => {
+  sock.ev.process(async (events) => {
+    if (events["connection.update"]) {
+      const update = events["connection.update"];
+      const { connection, lastDisconnect } = update;
+      if (update.qr) {
+        callback.get(CALLBACK_KEY.ON_QR)?.({
+          sessionId,
+          qr: update.qr,
+        });
+        options.onQRUpdated?.(update.qr);
+      }
+      if (connection == "connecting") {
+        callback.get(CALLBACK_KEY.ON_CONNECTING)?.(sessionId);
+        options.onConnecting?.();
+      }
+      if (connection === "close") {
+        const code = (lastDisconnect?.error as Boom)?.output?.statusCode;
+        let retryAttempt = retryCount.get(sessionId) ?? 0;
+        let shouldRetry;
+        if (code != DisconnectReason.loggedOut && retryAttempt < 10) {
+          shouldRetry = true;
+        }
+        if (shouldRetry) {
+          retryAttempt++;
+          retryCount.set(sessionId, retryAttempt);
+          startSocket();
+        } else {
+          retryCount.delete(sessionId);
+          deleteSession(sessionId);
+          callback.get(CALLBACK_KEY.ON_DISCONNECTED)?.(sessionId);
+          options.onDisconnected?.();
+        }
+      }
+      if (connection == "open") {
+        retryCount.delete(sessionId);
+        callback.get(CALLBACK_KEY.ON_CONNECTED)?.(sessionId);
+        options.onConnected?.();
+      }
+    }
+    if (events["creds.update"]) {
+      await saveCreds();
+    }
+    if (events["messages.update"]) {
+      const msg = events["messages.update"][0];
+      const mimeType = getMediaMimeType(msg);
+      const media = { mimeType, data: "" };
+      if (mimeType !== "") {
+        const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
+        media.data = mediaBuffer.toString("base64");
+      }
+
+      const data: MessageUpdated = {
+        sessionId: sessionId,
+        messageStatus: parseMessageStatusCodeToReadable(msg.update.status!),
+        ...msg,
+        ...media,
+      };
+      callback.get(CALLBACK_KEY.ON_MESSAGE_UPDATED)?.(sessionId, data);
+      options.onMessageUpdated?.(data);
+    }
+    if (events["messages.upsert"]) {
+      let msg = events["messages.upsert"]
+        .messages?.[0] as unknown as MessageReceived;
+      const mimeType = getMediaMimeType(msg);
+      const media = { mimeType, data: "" };
+      if (mimeType !== "") {
+        const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
+        media.data = mediaBuffer.toString("base64");
+      }
+
+      const from = msg.key.remoteJid || "";
+      const participant = msg.key.participant || "";
+      const isGroup = from.includes("@g.us");
+      const isStory = from.includes("status@broadcast");
+      const myJid = phoneToJid({ to: sock.user.id.split(":")[0] });
+
+      msg.author = from;
+      if (isStory || isGroup) msg.author = participant;
+
+      if (msg.key.fromMe) msg.author = myJid;
+
+      msg.media = media;
+      msg.sessionId = sessionId;
+      msg.saveImage = (path) => saveImageHandler(msg, path);
+      msg.saveVideo = (path) => saveVideoHandler(msg, path);
+      msg.saveDocument = (path) => saveDocumentHandler(msg, path);
+      callback.get(CALLBACK_KEY.ON_MESSAGE_RECEIVED)?.({
+        ...msg,
+      });
+      options.onMessageReceived?.(msg);
+    }
+
+    if (events["group-participants.update"]) {
+      const dataupdate = {
+        ...events["group-participants.update"],
+        sessionId,
+      };
+      options.onGroupMemberUpdate?.(dataupdate);
+      callback.get(CALLBACK_KEY.ON_GROUP_MEMBER_UPDATE)?.(dataupdate);
+    }
+  });
+};
+
 /**
  * Start WhatsApp session with QR method
  */
@@ -79,98 +190,8 @@ export const startSessionWithQR = async (
     });
     sessions.set(sessionId, { ...sock });
     try {
-      sock.ev.process(async (events) => {
-        if (events["connection.update"]) {
-          const update = events["connection.update"];
-          const { connection, lastDisconnect } = update;
-          if (update.qr) {
-            callback.get(CALLBACK_KEY.ON_QR)?.({
-              sessionId,
-              qr: update.qr,
-            });
-            options.onQRUpdated?.(update.qr);
-          }
-          if (connection == "connecting") {
-            callback.get(CALLBACK_KEY.ON_CONNECTING)?.(sessionId);
-            options.onConnecting?.();
-          }
-          if (connection === "close") {
-            const code = (lastDisconnect?.error as Boom)?.output?.statusCode;
-            let retryAttempt = retryCount.get(sessionId) ?? 0;
-            let shouldRetry;
-            if (code != DisconnectReason.loggedOut && retryAttempt < 10) {
-              shouldRetry = true;
-            }
-            if (shouldRetry) {
-              retryAttempt++;
-              retryCount.set(sessionId, retryAttempt);
-              startSocket();
-            } else {
-              retryCount.delete(sessionId);
-              deleteSession(sessionId);
-              callback.get(CALLBACK_KEY.ON_DISCONNECTED)?.(sessionId);
-              options.onDisconnected?.();
-            }
-          }
-          if (connection == "open") {
-            retryCount.delete(sessionId);
-            callback.get(CALLBACK_KEY.ON_CONNECTED)?.(sessionId);
-            options.onConnected?.();
-          }
-        }
-        if (events["creds.update"]) {
-          await saveCreds();
-        }
-        if (events["messages.update"]) {
-          const msg = events["messages.update"][0];
-          const mimeType = getMediaMimeType(msg);
-          const media = { mimeType, data: "" };
-          if (mimeType !== "") {
-            const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
-            media.data = mediaBuffer.toString("base64");
-          }
+      await initializeSocket(sock, sessionId, options, startSocket, saveCreds);
 
-          const data: MessageUpdated = {
-            sessionId: sessionId,
-            messageStatus: parseMessageStatusCodeToReadable(msg.update.status!),
-            ...msg,
-            ...media,
-          };
-          callback.get(CALLBACK_KEY.ON_MESSAGE_UPDATED)?.(sessionId, data);
-          options.onMessageUpdated?.(data);
-        }
-        if (events["messages.upsert"]) {
-          let msg = events["messages.upsert"]
-            .messages?.[0] as unknown as MessageReceived;
-          const mimeType = getMediaMimeType(msg);
-          const media = { mimeType, data: "" };
-          if (mimeType !== "") {
-            const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
-            media.data = mediaBuffer.toString("base64");
-          }
-
-          const from = msg.key.remoteJid || "";
-          const participant = msg.key.participant || "";
-          const isGroup = from.includes("@g.us");
-          const isStory = from.includes("status@broadcast");
-          const myJid = phoneToJid({ to: sock.user.id.split(":")[0] });
-
-          msg.author = from;
-          if (isStory || isGroup) msg.author = participant;
-
-          if (msg.key.fromMe) msg.author = myJid;
-
-          msg.media = media;
-          msg.sessionId = sessionId;
-          msg.saveImage = (path) => saveImageHandler(msg, path);
-          msg.saveVideo = (path) => saveVideoHandler(msg, path);
-          msg.saveDocument = (path) => saveDocumentHandler(msg, path);
-          callback.get(CALLBACK_KEY.ON_MESSAGE_RECEIVED)?.({
-            ...msg,
-          });
-          options.onMessageReceived?.(msg);
-        }
-      });
       return sock;
     } catch (error) {
       // console.log("SOCKET ERROR", error);
@@ -211,86 +232,8 @@ export const startSessionWithPairingCode = async (
         options.onPairingCode?.(code);
       }
 
-      sock.ev.process(async (events) => {
-        if (events["connection.update"]) {
-          const update = events["connection.update"];
-          const { connection, lastDisconnect } = update;
-          if (update.qr) {
-            callback.get(CALLBACK_KEY.ON_QR)?.({
-              sessionId,
-              qr: update.qr,
-            });
-            options.onQRUpdated?.(update.qr);
-          }
-          if (connection == "connecting") {
-            callback.get(CALLBACK_KEY.ON_CONNECTING)?.(sessionId);
-            options.onConnecting?.();
-          }
-          if (connection === "close") {
-            const code = (lastDisconnect?.error as Boom)?.output?.statusCode;
-            let retryAttempt = retryCount.get(sessionId) ?? 0;
-            let shouldRetry;
-            if (code != DisconnectReason.loggedOut && retryAttempt < 10) {
-              shouldRetry = true;
-            }
-            if (shouldRetry) {
-              retryAttempt++;
-              retryCount.set(sessionId, retryAttempt);
-              startSocket();
-            } else {
-              retryCount.delete(sessionId);
-              deleteSession(sessionId);
-              callback.get(CALLBACK_KEY.ON_DISCONNECTED)?.(sessionId);
-              options.onDisconnected?.();
-            }
-          }
-          if (connection == "open") {
-            retryCount.delete(sessionId);
-            callback.get(CALLBACK_KEY.ON_CONNECTED)?.(sessionId);
-            options.onConnected?.();
-          }
-        }
-        if (events["creds.update"]) {
-          await saveCreds();
-        }
-        if (events["messages.update"]) {
-          const msg = events["messages.update"][0];
-          const mimeType = getMediaMimeType(msg);
-          const media = { mimeType, data: "" };
-          if (mimeType !== "") {
-            const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
-            media.data = mediaBuffer.toString("base64");
-          }
+      await initializeSocket(sock, sessionId, options, startSocket, saveCreds);
 
-          const data: MessageUpdated = {
-            sessionId: sessionId,
-            messageStatus: parseMessageStatusCodeToReadable(msg.update.status!),
-            ...msg,
-            ...media,
-          };
-          callback.get(CALLBACK_KEY.ON_MESSAGE_UPDATED)?.(sessionId, data);
-          options.onMessageUpdated?.(data);
-        }
-        if (events["messages.upsert"]) {
-          let msg = events["messages.upsert"]
-            .messages?.[0] as unknown as MessageReceived;
-          const mimeType = getMediaMimeType(msg);
-          const media = { mimeType, data: "" };
-          if (mimeType !== "") {
-            const mediaBuffer = await downloadMediaMessage(msg, "buffer", {});
-            media.data = mediaBuffer.toString("base64");
-          }
-          msg.media = media;
-          msg.sessionId = sessionId;
-          msg.saveImage = (path) => saveImageHandler(msg, path);
-          msg.saveVideo = (path) => saveVideoHandler(msg, path);
-          msg.saveDocument = (path) => saveDocumentHandler(msg, path);
-          callback.get(CALLBACK_KEY.ON_MESSAGE_RECEIVED)?.({
-            ...msg,
-          });
-          options.onMessageReceived?.(msg);
-        }
-      });
       return sock;
     } catch (error) {
       // console.log("SOCKET ERROR", error);
@@ -406,4 +349,10 @@ export const onPairingCode = (
   listener: (sessionId: string, code: string) => any
 ) => {
   callback.set(CALLBACK_KEY.ON_PAIRING_CODE, listener);
+};
+
+export const onGroupMemberUpdate = (
+  listener: (data: GroupMemberUpdated) => any
+) => {
+  callback.set(CALLBACK_KEY.ON_GROUP_MEMBER_UPDATE, listener);
 };
